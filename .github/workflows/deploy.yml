@@ -1,0 +1,99 @@
+name: CI/CD Pipeline - Test and Deploy to AWS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with: 
+          name: coverage-report
+          path: coverage/
+
+
+  deploy:
+    name: Deploy to AWS Elastic Beanstalk
+    runs-on: ubuntu-latest
+    needs: test            # CRITICAL: Only deploy if tests pass!
+    if: github.ref == 'refs/heads/main'  # Only deploy from main branch
+ 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+ 
+      # Configure AWS credentials from GitHub Secrets
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+ 
+      # Create a ZIP of the application (what Elastic Beanstalk needs)
+      - name: Create deployment package
+        run: zip -r deploy.zip . -x '*.git*' -x 'node_modules/*' -x 'coverage/*'
+ 
+      # Upload the ZIP to S3 (Elastic Beanstalk reads from S3)
+      - name: Upload to S3
+        run: |
+          aws s3 cp deploy.zip s3://${{ secrets.EB_APP_NAME }}-deployments/\
+            deploy-${{ github.sha }}.zip
+ 
+      # Create a new application version in Elastic Beanstalk
+      - name: Create EB application version
+        run: |
+          aws elasticbeanstalk create-application-version \
+            --application-name ${{ secrets.EB_APP_NAME }} \
+            --version-label ${{ github.sha }} \
+            --source-bundle S3Bucket=${{ secrets.EB_APP_NAME }}-deployments,\
+              S3Key=deploy-${{ github.sha }}.zip
+ 
+      # Deploy the new version to the environment
+      - name: Deploy to Elastic Beanstalk
+        run: |
+          aws elasticbeanstalk update-environment \
+            --application-name ${{ secrets.EB_APP_NAME }} \
+            --environment-name ${{ secrets.EB_ENV_NAME }} \
+            --version-label ${{ github.sha }}
+ 
+      # Wait for deployment to finish (up to 10 minutes)
+      - name: Wait for deployment
+        run: |
+          aws elasticbeanstalk wait environment-updated \
+            --application-name ${{ secrets.EB_APP_NAME }} \
+            --environment-names ${{ secrets.EB_ENV_NAME }}
+ 
+      - name: Print deployment URL
+        run: |
+          URL=$(aws elasticbeanstalk describe-environments \
+            --application-name ${{ secrets.EB_APP_NAME }} \
+            --environment-names ${{ secrets.EB_ENV_NAME }} \
+            --query 'Environments[0].CNAME' --output text)
+          echo '========================================='
+          echo "Deployed successfully! App URL: http://$URL"
+          echo '========================================='
+      
