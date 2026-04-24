@@ -59,18 +59,11 @@ jobs:
  
       # Upload the ZIP to S3 (Elastic Beanstalk reads from S3)
       - name: Upload to S3
-        run: |
-          aws s3 cp deploy.zip s3://${{ secrets.EB_APP_NAME }}-deployments/\
-            deploy-${{ github.sha }}.zip
+        run: aws s3 cp deploy.zip s3://${{ secrets.EB_APP_NAME }}-deployments/deploy-${{ github.sha }}.zip
  
       # Create a new application version in Elastic Beanstalk
       - name: Create EB application version
-        run: |
-          aws elasticbeanstalk create-application-version \
-            --application-name ${{ secrets.EB_APP_NAME }} \
-            --version-label ${{ github.sha }} \
-            --source-bundle S3Bucket=${{ secrets.EB_APP_NAME }}-deployments,\
-              S3Key=deploy-${{ github.sha }}.zip
+          run: aws elasticbeanstalk create-application-version --application-name ${{ secrets.EB_APP_NAME }} --version-label ${{ github.sha }} --source-bundle S3Bucket=${{ secrets.EB_APP_NAME }}-deployments,S3Key=deploy-${{ github.sha }}.zip
  
       # Deploy the new version to the environment
       - name: Deploy to Elastic Beanstalk
