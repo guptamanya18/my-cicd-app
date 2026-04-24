@@ -33,6 +33,11 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main'
 
+    env:
+      APP_NAME: ${{ secrets.EB_APP_NAME }}
+      ENV_NAME: ${{ secrets.EB_ENV_NAME }}
+      SHA: ${{ github.sha }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,25 +53,35 @@ jobs:
         run: zip -r deploy.zip . -x "*.git*" -x "node_modules/*" -x "coverage/*"
 
       - name: Upload to S3
-        run: |
-          aws s3 cp deploy.zip \
-            s3://${{ secrets.EB_APP_NAME }}-deployments/deploy-${{ github.sha }}.zip
+        run: aws s3 cp deploy.zip s3://${APP_NAME}-deployments/deploy-${SHA}.zip
 
       - name: Create EB application version
         run: |
           aws elasticbeanstalk create-application-version \
-            --application-name ${{ secrets.EB_APP_NAME }} \
-            --version-label ${{ github.sha }} \
-            --source-bundle S3Bucket=${{ secrets.EB_APP_NAME }}-deployments,S3Key=deploy-${{ github.sha }}.zip
+            --application-name ${APP_NAME} \
+            --version-label ${SHA} \
+            --source-bundle S3Bucket=${APP_NAME}-deployments,S3Key=deploy-${SHA}.zip
 
       - name: Deploy to Elastic Beanstalk
         run: |
           aws elasticbeanstalk update-environment \
-            --application-name ${{ secrets.EB_APP_NAME }} \
-            --environment-name ${{ secrets.EB_ENV_NAME }} \
-            --version-label ${{ github.sha }}
+            --application-name ${APP_NAME} \
+            --environment-name ${ENV_NAME} \
+            --version-label ${SHA}
 
       - name: Wait for deployment
         run: |
           aws elasticbeanstalk wait environment-updated \
-            --application-name ${{ secrets
+            --application-name ${APP_NAME} \
+            --environment-names ${ENV_NAME}
+
+      - name: Print deployment URL
+        run: |
+          URL=$(aws elasticbeanstalk describe-environments \
+            --application-name ${APP_NAME} \
+            --environment-names ${ENV_NAME} \
+            --query 'Environments[0].CNAME' \
+            --output text)
+          echo "========================================="
+          echo "Deployed! App URL: http://$URL"
+          echo "========================================="
